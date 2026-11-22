@@ -1,40 +1,40 @@
-# ⚠ 不要写 `* @owner-a @owner-b @owner-c` 这种默认行。
+# ⚠ 不要写 `* @Br1m2y @flamel0622 @SEASON1015` 这种默认行。
 # CODEOWNERS 一行列出多个 owner 的语义是「这些人全部批准才能合」，
 # 配合 require_code_owner_reviews 会让每个 PR 都要三人批。
 # 未列出的路径 = 不受 code owner 约束，任意 1 人 Approve 即可合并。
 #
-# @owner-a / @owner-b / @owner-c 换成真实 GitHub 用户名。
+# @Br1m2y / @flamel0622 / @SEASON1015 换成真实 GitHub 用户名。
 
 # 契约层：认证层与调度层共用的接口，A、B 双批。C 只消费不改，不强制。
-/pkg/contract/                  @owner-a @owner-b
-/api/schema/                    @owner-a @owner-b
+/pkg/contract/                  @Br1m2y @flamel0622
+/api/schema/                    @Br1m2y @flamel0622
 
 # 认证与基础设施 —— A
-/internal/auth/                 @owner-a
-/internal/ippool/               @owner-a
-/internal/config/               @owner-a
-/internal/logx/                 @owner-a
-/cmd/phase0probe/               @owner-a
-/tools/phase0/                  @owner-a
+/internal/auth/                 @Br1m2y
+/internal/ippool/               @Br1m2y
+/internal/config/               @Br1m2y
+/internal/logx/                 @Br1m2y
+/cmd/phase0probe/               @Br1m2y
+/tools/phase0/                  @Br1m2y
 
 # 代理与调度 —— B
-/internal/proxy/                @owner-b
-/internal/scheduler/            @owner-b
-/internal/health/               @owner-b
-/internal/metrics/              @owner-b
-/internal/control/              @owner-b
-/cmd/caulinkd/                  @owner-b
+/internal/proxy/                @flamel0622
+/internal/scheduler/            @flamel0622
+/internal/health/               @flamel0622
+/internal/metrics/              @flamel0622
+/internal/control/              @flamel0622
+/cmd/caulinkd/                  @flamel0622
 # control 归 B 而不是 C：它直接读 ippool/metrics/scheduler 的内部状态，
 # 放在 B 的模块边界内才合理。C 是这份契约的消费方，改字段需双方同意
 # （见 docs/status-api.md §7）。
 
 # 策略、界面、测试 —— C
-/internal/classify/             @owner-c
-/desktop/                       @owner-c
-/test/                          @owner-c
+/internal/classify/             @SEASON1015
+/desktop/                       @SEASON1015
+/test/                          @SEASON1015
 
 # 流程与合规 —— 单人负责，避免全员等待
-/.github/                       @owner-c
-/scripts/                       @owner-c
-/.githooks/                     @owner-c
-/docs/compliance.md             @owner-a
+/.github/                       @SEASON1015
+/scripts/                       @SEASON1015
+/.githooks/                     @SEASON1015
+/docs/compliance.md             @Br1m2y
