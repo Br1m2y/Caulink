@@ -1,0 +1,123 @@
+name: ci
+
+# 所有分支的 push 都跑，PR 也跑：开发期在 feat/* 分支上也要有反馈。
+# 注意：不要把 hashFiles() 写进 job 级 if —— GitHub 会判定整个 workflow 非法，
+# 一次 push 都跑不起来（表现为 0s 失败、"workflow file issue"）。
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 本项目刻意零第三方依赖。出现 go.sum 意味着引入了外部库，
+      # 需要在对应 PR 里说明理由。
+      - name: 检查依赖是否仍为零
+        run: |
+          if [ -f go.sum ]; then
+            echo "::warning::仓库出现了 go.sum。若非有意引入依赖，请检查是否误提交。"
+          fi
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "以下文件未格式化，请运行 gofmt -w .："
+            echo "$out"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      # -race 必须开。这个项目并发密度很高（每 IP 一个看护协程、调度器持锁、
+      # UDP 会话表三条关闭路径、metrics 原子计数），数据竞争靠 review 看不出来。
+      # 本地 Windows 上跑 -race 需要 cgo + gcc，不是所有人都有，所以 CI 是唯一保障。
+      - name: test
+        run: go test -race -timeout 180s ./...
+
+      - name: build
+        run: go build ./...
+
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 仓库里有 proc_windows.go / connrefused_windows.go 这类平台专用文件。
+      # Linux 上的 go build 根本不会编译它们，写错了也不会有人发现 ——
+      # 直到有人在 Windows 上构建。这一步就是防这个。
+      - name: 交叉编译 Windows
+        run: GOOS=windows GOARCH=amd64 go build ./...
+
+      - name: 交叉编译 macOS
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+
+      - name: 交叉 vet Windows
+        run: GOOS=windows GOARCH=amd64 go vet ./...
+
+  # 桌面端：desktop/ 还没生成时整段跳过（用 step 级 if，不能用 job 级 hashFiles）。
+  # Ubuntu runner 缺 GTK4/WebKitGTK，所以 continue-on-error，真正的构建在 Windows 上做。
+  desktop:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: detect desktop project
+        id: detect
+        run: |
+          if [ -f desktop/Taskfile.yml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "desktop/ 还没有生成，跳过桌面构建（先跑 scripts/init-desktop.sh）"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.detect.outputs.exists == 'true'
+        with:
+          # 桌面端是独立 module，要求 Go >= 1.26（见 desktop/go.mod），
+          # 不能用根模块的 go-version-file（那是 1.23）。
+          go-version: 'stable'
+
+      # Ubuntu runner 没有 WebView2，跑不了完整的 wails3 build。
+      # 但桌面端用 purego 加载 WebView2，这个 tag 下可以纯 Go 编译，
+      # 足以验证"代码能编译、依赖没坏"，比直接跳过有价值。
+      - name: build desktop (purego)
+        if: steps.detect.outputs.exists == 'true'
+        working-directory: desktop
+        run: go build -tags purego .
+
+  # 启动器是独立 module（tools/launcher），根模块的 ./... 覆盖不到它；
+  # 它是 Windows 专有代码（syscall.NewLazyDLL、runas 提权），只能在 Windows 上编译。
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/launcher/go.mod
+
+      - name: build
+        working-directory: tools/launcher
+        run: go build ./...
+
+      - name: test
+        working-directory: tools/launcher
+        run: go test ./...

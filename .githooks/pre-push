@@ -1,0 +1,40 @@
+#!/bin/sh
+# 阻止直接向 main/master 推送（只挡本地，最强的是远端保护规则）。
+#
+# 安装：仓库根目录执行一次
+#   git config core.hooksPath .githooks
+# 或由 scripts/dev-setup.sh 自动完成。
+#
+# 例外：目标分支在远端还不存在（remote_sha 全 0）时放行，
+# 否则第一次创建 main 会被自己的 hook 挡住。
+#
+# 绕过（仅在明确知道后果时）：git push --no-verify
+
+protected="main master"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/*) branch="${remote_ref#refs/heads/}" ;;
+        *) continue ;;
+    esac
+
+    for p in $protected; do
+        [ "$branch" = "$p" ] || continue
+
+        # 新建分支（远端还没有）放行
+        case "$remote_sha" in
+            0000000000000000000000000000000000000000)
+                continue
+                ;;
+        esac
+
+        echo "pre-push: 拒绝直接推送到 $branch。" >&2
+        echo "pre-push: 请开分支走 PR：" >&2
+        echo "           git switch -c feat/<模块>-<主题>" >&2
+        echo "           git push -u origin HEAD" >&2
+        echo "pre-push: 确认要绕过：git push --no-verify" >&2
+        exit 1
+    done
+done
+
+exit 0

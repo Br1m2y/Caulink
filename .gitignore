@@ -1,0 +1,44 @@
+# build output
+bin/
+dist/
+*.exe
+*.test
+*.out
+
+# third-party binaries: never committed, only README + checksum are tracked
+third_party/*
+!third_party/README.md
+!third_party/*.sha256
+
+# local config and secrets
+configs/*.local.*
+data/
+.env
+*.log
+
+# phase0 raw measurement data
+tools/phase0/out/
+tools/phase0/*.csv
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Wails / Node (desktop/)
+desktop/frontend/node_modules/
+desktop/frontend/dist/
+desktop/frontend/.vite/
+desktop/bin/
+*.syso
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地工具链（wails3、Go 缓存等），不进版本库
+.tools/
+
+# 本地调试截图
+shot-*.png

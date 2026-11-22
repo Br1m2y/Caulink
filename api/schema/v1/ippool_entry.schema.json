@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Br1m2y/caulink/api/schema/v1/ippool_entry.schema.json",
+  "title": "IPPoolEntry",
+  "description": "One schedulable source IP. Source of truth: pkg/contract/v1/ippool_entry.go",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "interface",
+    "source_ip",
+    "auth_status",
+    "health_score",
+    "rtt_ms",
+    "loss_rate",
+    "last_seen"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Stable identity, conventionally <interface>@<source_ip>."
+    },
+    "interface": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OS interface name carrying source_ip, e.g. eth0."
+    },
+    "source_ip": {
+      "type": "string",
+      "format": "ipv4",
+      "description": "Bare source IP bound for outbound connections. No port, no mask."
+    },
+    "auth_status": {
+      "type": "string",
+      "enum": ["online", "offline", "reauthenticating"],
+      "description": "Campus session state of source_ip."
+    },
+    "health_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Scheduler weight. 1.0 best, 0 not schedulable."
+    },
+    "rtt_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Smoothed RTT in milliseconds. 0 means unknown."
+    },
+    "loss_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Packet loss ratio in [0,1], not a percentage."
+    },
+    "last_seen": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last confirmed-alive moment, RFC3339, UTC."
+    }
+  }
+}

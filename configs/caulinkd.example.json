@@ -1,0 +1,47 @@
+{
+    "_readme":  "字段说明见 README.md「配置字段」一节。socks5.listen / http_proxy.listen / status.listen 只允许回环地址。",
+    "data_dir":  "data",
+    "sources":  [
+                    {
+                        "interface":  "eth0",
+                        "source_ip":  "10.0.0.2"
+                    },
+                    {
+                        "interface":  "eth1",
+                        "source_ip":  "10.0.0.3"
+                    }
+                ],
+    "auth":  {
+                 "enabled":  true,
+                 "binary":  "bin/caulink-auth.exe",
+                 "username":  "",
+                 "password":  "",
+                 "guardian_seconds":  30,
+                 "realm":  "cau",
+                 "portal":  "10.3.191.9",
+                 "port":  801
+             },
+    "health":  {
+                   "interval_seconds":  10,
+                   "timeout_seconds":  3,
+                   "target":  "www.msftconnecttest.com:80",
+                   "window":  10
+               },
+    "socks5":  {
+                   "listen":  "127.0.0.1:1080"
+               },
+    "http_proxy":  {
+                       "listen":  "127.0.0.1:8080",
+                       "upstream":  {
+                                        "proxy":  "http://127.0.0.1:17891",
+                                        "domains":  [
+                                                        "steamcommunity.com",
+                                                        "*.steampowered.com",
+                                                        ".steamstatic.com"
+                                                    ]
+                                    }
+                   },
+    "status":  {
+                   "listen":  "127.0.0.1:7788"
+               }
+}

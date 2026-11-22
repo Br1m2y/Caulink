@@ -1,0 +1,17 @@
+{
+  "_readme": "字段含义见 Phase0验证方案.md 第 5 节。JSON 不支持注释，所以用这个字段占位，程序会忽略它。",
+  "targets": [
+    "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-releases/22.04/ubuntu-22.04.5-desktop-amd64.iso",
+    "https://mirrors.ustc.edu.cn/ubuntu-releases/22.04/ubuntu-22.04.5-desktop-amd64.iso",
+    "https://speed.cloudflare.com/__down?bytes=50000000"
+  ],
+  "connections_per_ip": 8,
+  "duration_seconds": 15,
+  "warmup_seconds": 3,
+  "rounds": 3,
+  "cooldown_seconds": 5,
+  "include_interfaces": "",
+  "exclude_interfaces": "(?i)^(lo|docker|veth|br-|virbr|vmnet|utun|tun|tap|wg|tailscale|radmin|zerotier|hamachi)",
+  "max_source_ips": 3,
+  "output_dir": "tools/phase0/out"
+}

@@ -1,0 +1,118 @@
+package main
+
+// 「重新扫描」的实现：把配置里的源列表与网卡现状重新核对一次。
+//
+// 为什么需要它：校园网是 DHCP，网卡重连后地址会变
+// （实测 10.6.53.173 → 10.6.69.131）。启动时已经校正过一次，
+// 但用户可能在使用过程中插拔网线、切换 WiFi——那时不该要求重启程序。
+//
+// 扫描的语义很窄，只做三件事：
+//   1. 用网卡当前地址重算源列表（resolveSources）
+//   2. 池里多余的移除、缺的补上
+//   3. 认证层同步启停，让新 IP 立刻开始认证
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/Br1m2y/caulink/internal/control"
+	"github.com/Br1m2y/caulink/internal/ippool"
+	contract "github.com/Br1m2y/caulink/pkg/contract/v1"
+)
+
+type sourceController struct {
+	mu     sync.Mutex
+	logger *slog.Logger
+	ctx    context.Context
+
+	// configured 是配置文件里的原始源列表，可能包含过期的 IP。
+	configured []SourceConfig
+	// exclude 是要排除在自动发现之外的网卡名（与配置里的 exclude_interfaces 一致）。
+	exclude []string
+	pool    *ippool.Pool
+	auth    *authController
+}
+
+func newSourceController(ctx context.Context, logger *slog.Logger, configured []SourceConfig, exclude []string, pool *ippool.Pool, auth *authController) *sourceController {
+	return &sourceController{logger: logger, ctx: ctx, configured: configured, exclude: exclude, pool: pool, auth: auth}
+}
+
+// RescanSources 见 control.SourceController。
+func (c *sourceController) RescanSources() (control.RescanResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	res := control.RescanResult{At: time.Now()}
+
+	next := resolveSources(c.configured, c.exclude, c.logger)
+
+	want := make(map[string]SourceConfig, len(next))
+	for _, s := range next {
+		want[s.Interface+"@"+s.SourceIP] = s
+	}
+
+	cur := make(map[string]contract.IPPoolEntry)
+	for _, e := range c.pool.Snapshot() {
+		cur[e.ID] = e
+	}
+
+	// 1) 移除：池里有、网卡上已不存在的源
+	for id := range cur {
+		if _, ok := want[id]; ok {
+			continue
+		}
+		c.pool.Remove(id)
+		if c.auth != nil {
+			if err := c.auth.StopEntry(id); err != nil {
+				c.logger.Warn("停止认证实例失败", "id", id, "err", err)
+			}
+		}
+		res.Removed = append(res.Removed, id)
+		c.logger.Info("扫描：移除已失效的源", "id", id)
+	}
+
+	// 2) 新增：网卡上出现、池里还没有的源
+	var entries []contract.IPPoolEntry
+	for id, s := range want {
+		if _, ok := cur[id]; ok {
+			res.Unchanged = append(res.Unchanged, id)
+			entries = append(entries, cur[id])
+			continue
+		}
+		e := contract.IPPoolEntry{
+			ID:         id,
+			Interface:  s.Interface,
+			SourceIP:   s.SourceIP,
+			AuthStatus: contract.AuthOffline,
+		}
+		if err := c.pool.Upsert(e); err != nil {
+			return res, fmt.Errorf("加入 IP 池失败（%s）: %w", id, err)
+		}
+		if c.auth != nil {
+			// 认证层要知道这个新源；有凭据时它会立刻开始登录。
+			if err := c.auth.StartEntry(c.ctx, e); err != nil {
+				c.logger.Warn("为新源启动认证失败", "id", id, "err", err)
+			}
+		}
+		res.Added = append(res.Added, id)
+		entries = append(entries, e)
+		c.logger.Info("扫描：发现新的源", "id", id, "ip", s.SourceIP)
+	}
+
+	// 3) 让认证层持有的源列表与池保持一致
+	if c.auth != nil {
+		c.auth.ReplaceEntries(entries)
+	}
+
+	switch {
+	case len(res.Added) == 0 && len(res.Removed) == 0:
+		res.Message = fmt.Sprintf("扫描完成：%d 个端口，没有变化", len(res.Unchanged))
+	default:
+		res.Message = fmt.Sprintf("扫描完成：新增 %d，移除 %d，未变 %d",
+			len(res.Added), len(res.Removed), len(res.Unchanged))
+	}
+	return res, nil
+}
