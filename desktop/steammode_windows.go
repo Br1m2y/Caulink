@@ -35,7 +35,11 @@ import (
 const (
 	// steamProxyAddr 是 caulinkd 的 HTTP 代理地址。
 	steamProxyAddr = "127.0.0.1:8080"
-	// steamHoldSeconds 是启动后按住代理的时长。
+	// steamHoldSeconds 是"按住代理"的兜底时长参数。
+	// 现在的语义是**不自动停止**：Steam 启动后一直把系统代理按在 caulinkd 上，
+	// 直到用户手动关闭开关（或退出程序）。原因：Steam 的内嵌网页（商店/库）
+	// 每次加载都会重新读系统代理，若 90 秒后放手，VPN 客户端会立刻把代理改回自己，
+	// 商店页就会显示"无互联网连接"。
 	//
 	// 实测：Steam 在启动后几十秒内才真正读取代理，单次设置必被 VPN 抢走。
 	// 90 秒足够覆盖它的初始化。
@@ -74,9 +78,12 @@ type steamStatusPayload struct {
 func (s *steamModeState) snapshot() steamStatusPayload {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// remain = -1 表示"按住直到手动关闭"，前端据此显示不同文案。
 	remain := 0
-	if s.running && !s.holdTill.IsZero() {
-		if d := time.Until(s.holdTill); d > 0 {
+	if s.running {
+		if s.holdTill.IsZero() {
+			remain = -1
+		} else if d := time.Until(s.holdTill); d > 0 {
 			remain = int(d.Seconds())
 		}
 	}
@@ -219,15 +226,15 @@ func (s *steamModeState) run(cancel chan struct{}) {
 		s.fail(fmt.Errorf("启动 Steam 失败: %w", err))
 		return
 	}
-	log.Printf("[steam-mode] Steam 已启动，开始按住代理 %d 秒", steamHoldSeconds)
+	log.Printf("[steam-mode] Steam 已启动，开始持续按住代理（直到手动关闭）")
 
-	// 4) 持续按住，直到超时或取消
-	s.set("holding", fmt.Sprintf("Steam 已启动，正在保持代理 %d 秒", steamHoldSeconds))
+	// 4) 持续按住，直到用户关闭开关
+	// 不设超时：Steam 的内嵌网页会反复读取系统代理，一旦放手就会被 VPN 抢走。
+	s.set("holding", "Steam 已启动，正在持续保持代理（直到手动关闭）")
 	s.mu.Lock()
-	s.holdTill = time.Now().Add(steamHoldSeconds * time.Second)
+	s.holdTill = time.Time{} // 零值 = 不自动停止
 	s.mu.Unlock()
 
-	deadline := time.Now().Add(steamHoldSeconds * time.Second)
 	ticker := time.NewTicker(700 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -248,15 +255,7 @@ func (s *steamModeState) run(cancel chan struct{}) {
 			s.mu.Unlock()
 			return
 		case <-ticker.C:
-			if time.Now().After(deadline) {
-				s.mu.Lock()
-				s.running = false
-				s.phase = "done"
-				s.detail = "已完成：Steam 已重启并缓存了我们的代理"
-				s.holdTill = time.Time{}
-				s.mu.Unlock()
-				return
-			}
+			// 不做超时判断：只有用户关闭开关（cancel）才会退出按住。
 		}
 	}
 }

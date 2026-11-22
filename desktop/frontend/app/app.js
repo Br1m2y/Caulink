@@ -1183,6 +1183,7 @@
       steamModeFetch('/api/steam-mode', 'GET').then(function (st) {
         var text = st.detail || st.phase;
         if (st.remain_seconds > 0) text += '（还剩 ' + st.remain_seconds + ' 秒）';
+        else if (st.remain_seconds < 0) text += '（直到手动关闭）';
         renderSteamStatus(st, text);
         if (!st.running) {
           clearInterval(steamTimer);

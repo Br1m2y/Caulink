@@ -208,6 +208,17 @@ func repairConfig(path string, proxyOK bool) error {
 		changed = true
 	}
 
+	// 数据目录必须是安装根下的绝对路径。
+	//
+	// 守护进程的工作目录是 <安装根>\app：若配置里写相对 "data"，
+	// 运行数据（含明文凭据）会落到 app\data，打包发布时极易被一起塞进去。
+	// 这里每次都强制改写成绝对路径，老配置也能自动纠正。
+	dataDir := filepath.Join(filepath.Dir(filepath.Dir(path)), "data")
+	if cur, _ := cfg["data_dir"].(string); cur != dataDir {
+		cfg["data_dir"] = dataDir
+		changed = true
+	}
+
 	if !changed {
 		return nil
 	}
@@ -250,8 +261,12 @@ func readConfig(path string) (map[string]any, error) {
 	}
 
 	// 首次运行：给一份能直接跑的默认配置。账号密码留空，用户在界面里填。
+	//
+	// data_dir 必须写**安装根下的绝对路径**：守护进程的工作目录是 <安装根>\app，
+	// 若这里写相对 "data"，运行数据（含明文凭据）会落到 app\data，
+	// 打包发布时很容易被一起塞进发布包。踩过这个坑。
 	return map[string]any{
-		"data_dir": "data",
+		"data_dir": filepath.Join(filepath.Dir(filepath.Dir(path)), "data"),
 		"auth": map[string]any{
 			"enabled":          true,
 			"binary":           "caulink-auth.exe",

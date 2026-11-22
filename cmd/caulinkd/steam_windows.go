@@ -65,9 +65,12 @@ func (s *steamController) SteamModeStatus() control.SteamModeStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// remain = -1 表示"按住直到手动关闭"。
 	remain := 0
-	if s.running && !s.holdTill.IsZero() {
-		if d := time.Until(s.holdTill); d > 0 {
+	if s.running {
+		if s.holdTill.IsZero() {
+			remain = -1
+		} else if d := time.Until(s.holdTill); d > 0 {
 			remain = int(d.Seconds())
 		}
 	}
@@ -166,17 +169,16 @@ func (s *steamController) run(ctx context.Context) {
 		s.fail(fmt.Errorf("启动 Steam 失败: %w", err))
 		return
 	}
-	s.logger.Info("Steam 已重启，开始按住系统代理", "hold", steamHoldDuration.String())
+	s.logger.Info("Steam 已重启，开始持续按住系统代理（直到手动关闭）")
 
 	s.mu.Lock()
 	s.phase = "holding"
-	s.detail = fmt.Sprintf("Steam 已启动，正在保持代理 %d 秒", int(steamHoldDuration.Seconds()))
-	s.holdTill = time.Now().Add(steamHoldDuration)
+	s.detail = "Steam 已启动，正在持续保持代理（直到手动关闭）"
+	s.holdTill = time.Time{} // 零值 = 不自动停止
 	s.mu.Unlock()
 
 	ticker := time.NewTicker(700 * time.Millisecond)
 	defer ticker.Stop()
-	limit := time.Now().Add(steamHoldDuration)
 
 	for {
 		_ = setSystemProxy(s.proxy) // 单次失败不致命，下一轮再试
@@ -184,16 +186,7 @@ func (s *steamController) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if time.Now().After(limit) {
-				s.mu.Lock()
-				s.running = false
-				s.phase = "done"
-				s.detail = "已完成：Steam 已缓存我们的代理，下载将走多 IP"
-				s.holdTill = time.Time{}
-				s.mu.Unlock()
-				s.logger.Info("Steam 控制完成")
-				return
-			}
+			// 不做超时判断：只有退出/停止才会放手。
 		}
 	}
 }
