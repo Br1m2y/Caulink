@@ -189,6 +189,12 @@ func (c *authController) Logout() error {
 }
 
 // AuthStatus 见 control.AuthController。
+// HasCredential 表示本机是否保存了可沿用的凭据（见 control.AuthController）。
+func (c *authController) HasCredential() bool {
+	stored, err := c.loadCredential()
+	return err == nil && stored != nil
+}
+
 func (c *authController) AuthStatus() control.AuthRuntimeStatus {
 	c.mu.Lock()
 	defer c.mu.Unlock()

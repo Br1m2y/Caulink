@@ -17,6 +17,10 @@ type AuthController interface {
 	Logout() error
 	// AuthStatus 返回当前认证运行时状态。
 	AuthStatus() AuthRuntimeStatus
+	// HasCredential 表示本机是否保存了可沿用的凭据。
+	//
+	// 界面允许"留空密码沿用已保存凭据"，控制层据此区分"没填"与"本机也没有"。
+	HasCredential() bool
 }
 
 // AuthRuntimeStatus 是给 UI 的状态快照。
@@ -76,7 +80,13 @@ func (s *StatusServer) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "请求体不是合法 JSON")
 		return
 	}
-	if req.Username == "" || req.Password == "" {
+	// 不在这里拦空密码。
+	//
+	// 勾过「记住密码」之后，界面允许留空沿用本机凭据；具体能不能沿用由
+	// AuthController.Login 判断（它会读凭据、校验账号一致、把"没有可沿用的
+	// 凭据"翻译成明确提示）。此前这里直接返回"账号或密码为空"，导致
+	// "记住密码"在第二次登录时形同虚设——下层那段逻辑永远走不到。
+	if req.Username == "" && req.Password == "" && !s.Auth.HasCredential() {
 		writeErr(w, http.StatusBadRequest, "账号或密码为空")
 		return
 	}
