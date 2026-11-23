@@ -89,6 +89,8 @@
     tagFilter: new Set(),
     route: '#/',
     scanning: false,
+    // 上一次扫描里"存在但没参与调度"的网卡（没有可路由 IPv4），用于页脚提示。
+    skipped: [],
     chart: null,
     editingTag: null,
     newTagColor: 0,
@@ -628,16 +630,25 @@
     if (S.loginBusy) return;
     var u = el.username.value.trim();
     var p = el.password.value;
-    if (!u && !p && API.hasCredential()) {
-      toast('已在用本机保存的凭据登录；要更换账号请重新填写', 'warn');
-      return;
+    var has = API.hasCredential();
+    // 留空沿用本机凭据：勾过「记住密码」之后，第二次登录不该再逼用户重输一遍。
+    // 之前这里直接 return 一条提示，用户实际感受就是"记住密码没用"。
+    var reuse = has && !u && !p;
+    if (!u && !p && !has) {
+      toast('请输入校园网账号与密码', 'bad'); el.username.focus(); return;
     }
-    el.username.classList.toggle('is-invalid', !u);
-    el.password.classList.toggle('is-invalid', !p);
-    if (!u) { toast('请输入校园网账号', 'bad'); el.username.focus(); return; }
-    if (!p) { toast('请输入密码', 'bad'); el.password.focus(); return; }
+    if (!u && p) {
+      el.username.classList.add('is-invalid');
+      toast('请输入校园网账号', 'bad'); el.username.focus(); return;
+    }
+    if (!p && !has) {
+      el.password.classList.add('is-invalid');
+      toast('请输入密码', 'bad'); el.password.focus(); return;
+    }
+    el.username.classList.remove('is-invalid');
+    el.password.classList.remove('is-invalid');
 
-    var needConfirm = el.remember.checked && !API.hasCredential();
+    var needConfirm = !reuse && el.remember.checked && !has;
     var flow = needConfirm
       ? confirmAction({
           title: '保存账号密码？',
@@ -654,7 +665,7 @@
       el.loginBtn.innerHTML = '<span class="spinner"></span>登录中';
       // 真实认证：守护进程会用 Dr.COM 客户端实际登录一次，
       // 失败会带回具体原因（密码错、账号格式不对、门户不可达等）。
-      API.login(u, p, el.remember.checked).then(function (st) {
+      API.login(u, p, reuse ? true : el.remember.checked).then(function (st) {
         toast((st && st.message) || '登录成功', 'ok');
         el.password.value = '';
       }).catch(function (err) {
@@ -947,7 +958,15 @@
         renderAll();
         refreshAuthRuntime();
         // 后端会带回"新增 1，移除 1"这类摘要；没有就退回通用文案。
-        toast((res && res.message) || ('扫描完成，共 ' + API.ports().length + ' 个端口'), 'ok');
+        var msg = (res && res.message) || ('扫描完成，共 ' + API.ports().length + ' 个端口');
+        // 插了网卡却没出现时，把"为什么没出现"直接说出来。
+        // 没有可路由 IPv4 的网卡不会进池（认证也绑不上），但用户需要知道它们被看见了。
+        var skipped = (res && res.skipped) || [];
+        if (skipped.length) {
+          msg += '；另有 ' + skipped.length + ' 个网卡无可用 IPv4（' +
+            skipped.slice(0, 3).map(function (s) { return s.interface; }).join('、') + '）';
+        }
+        toast(msg, skipped.length ? 'warn' : 'ok');
       }).catch(function (err) {
         S.scanning = false;
         renderAll();

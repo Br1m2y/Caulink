@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,6 +114,34 @@ func (c *authController) Bootstrap() (bool, error) {
 
 // Login 见 control.AuthController。
 func (c *authController) Login(username, password string, remember bool) error {
+	// 允许"留空沿用本机保存的凭据"。
+	//
+	// 界面上的密码框一直写着"已保存（留空则沿用）"，但此前只有认证子进程的
+	// 自动重连会读凭据，手动点「登录」仍会报"请输入密码"——这是用户实际遇到的
+	// "勾了记住密码，第二次登录还要重新输密码"。
+	username = strings.TrimSpace(username)
+	if password == "" {
+		stored, err := c.loadCredential()
+		if err != nil {
+			return fmt.Errorf("读取本机凭据失败：%w", err)
+		}
+		if stored == nil {
+			return errors.New("请输入密码：本机还没有保存可沿用的凭据")
+		}
+		if username == "" {
+			username = stored.Username
+		}
+		if username != stored.Username {
+			return fmt.Errorf("更换账号需要重新输入密码（本机保存的是 %s）", maskAccount(stored.Username))
+		}
+		password = stored.Password
+		// 沿用本机凭据时继续记住；否则这次登录的 remember=false 分支会把
+		// 刚用上的凭据文件删掉，下一次又回到要手输密码的状态。
+		remember = true
+	} else if username == "" {
+		return errors.New("请输入校园网账号")
+	}
+
 	// 先真实验证一次：错密码立刻就能告诉用户，而不是等子进程反复失败。
 	pending, err := c.verifyCredential(username, password)
 	if err != nil {

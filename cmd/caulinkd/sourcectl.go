@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
@@ -107,6 +108,10 @@ func (c *sourceController) RescanSources() (control.RescanResult, error) {
 		c.auth.ReplaceEntries(entries)
 	}
 
+	// 4) 把"存在但没被采用"的网卡连原因一起带出去。
+	// 插了网卡点扫描却没变化，多半是那块网卡当时没有可路由的 IPv4。
+	res.Skipped = scanSkipped(c.exclude)
+
 	switch {
 	case len(res.Added) == 0 && len(res.Removed) == 0:
 		res.Message = fmt.Sprintf("扫描完成：%d 个端口，没有变化", len(res.Unchanged))
@@ -115,4 +120,74 @@ func (c *sourceController) RescanSources() (control.RescanResult, error) {
 			len(res.Added), len(res.Removed), len(res.Unchanged))
 	}
 	return res, nil
+}
+
+// scanSkipped 列出"本机存在、但这次没有参与调度"的网卡及原因。
+//
+// 两类典型情况：
+//   - 网卡插上了但 DHCP 还没谈完，只有 169.254.x.x 链路本地地址；
+//   - 网卡未连接/被禁用，没有任何 IPv4。
+//
+// 它们都不该进调度池（认证器绑不上地址，只会反复失败），但必须让用户看见，
+// 否则"插了网卡点扫描却没变化"看起来就是程序没发现新硬件。
+func scanSkipped(exclude []string) []control.SkippedInterface {
+	excluded := make(map[string]bool, len(exclude))
+	for _, name := range exclude {
+		if name != "" {
+			excluded[name] = true
+		}
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+
+	var out []control.SkippedInterface
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if excluded[ifi.Name] {
+			continue // 配置里主动排除的，不算"跳过"
+		}
+		if _, ok := interfaceIPv4(ifi.Name); ok {
+			continue // 有可路由地址，已经进池了
+		}
+
+		item := control.SkippedInterface{Interface: ifi.Name}
+		// 先看有没有地址，再判断为什么没用上。
+		hasLinkLocal := false
+		if addrs, aerr := ifi.Addrs(); aerr == nil {
+			for _, a := range addrs {
+				ipnet, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				v4 := ipnet.IP.To4()
+				if v4 == nil || !v4.IsLinkLocalUnicast() {
+					continue
+				}
+				hasLinkLocal = true
+				if item.Address == "" {
+					item.Address = v4.String()
+				}
+			}
+		}
+
+		switch {
+		case ifi.Flags&net.FlagUp == 0 && hasLinkLocal:
+			// Windows 对"未连接/虚拟"网卡保留 169.254 地址，但接口是 down 的。
+			// 它们永远不会进调度池，列出来只是为了解释数量差异。
+			item.Reason = "未连接或仅虚拟网卡（接口未启用，只有 169.254 地址）"
+		case ifi.Flags&net.FlagUp == 0:
+			item.Reason = "接口未启用（网卡被禁用或未插入）"
+		case hasLinkLocal:
+			item.Reason = "只有 169.254 链路本地地址：DHCP 还没分配，确认网线/Wi-Fi 已连上，等几秒再扫描"
+		default:
+			item.Reason = "没有 IPv4 地址（可能还在获取 DHCP）"
+		}
+		out = append(out, item)
+	}
+	return out
 }

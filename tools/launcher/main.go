@@ -193,8 +193,22 @@ func repairConfig(path string, proxyOK bool) error {
 	changed := false
 
 	if !currentlyValid(cfg["sources"], local) {
+		// 写 sources 时遵守 exclude_interfaces：VPN 虚拟网卡在这里就必须剔掉，
+		// 否则它会被当成校园网源，认证器拿它反复登录门户（必然失败）。
+		excluded := map[string]bool{}
+		if raw, ok := cfg["exclude_interfaces"].([]any); ok {
+			for _, item := range raw {
+				if name, ok := item.(string); ok && name != "" {
+					excluded[name] = true
+				}
+			}
+		}
 		arr := make([]any, 0, len(local))
 		for _, s := range local {
+			if excluded[s.Interface] {
+				writeLog("", "跳过被排除的网卡: "+s.Interface)
+				continue
+			}
 			arr = append(arr, map[string]any{
 				"interface": s.Interface,
 				"source_ip": s.SourceIP,

@@ -21,7 +21,20 @@ func resolveSources(srcs []SourceConfig, exclude []string, logger *slog.Logger) 
 	out := make([]SourceConfig, 0, len(srcs))
 	seen := make(map[string]bool, len(srcs))
 
+	// 先按配置排除一遍：启动器会把所有网卡（含 VPN 虚拟网卡）写进 sources，
+	// 只靠"发现时过滤"是不够的——已写进配置的照样会进池，去反复登录校园门户。
+	excludedConfigured := make(map[string]bool, len(exclude))
+	for _, name := range exclude {
+		if name != "" {
+			excludedConfigured[name] = true
+		}
+	}
+
 	for _, s := range srcs {
+		if excludedConfigured[s.Interface] {
+			logger.Info("按配置排除该网卡，不参与调度", "interface", s.Interface, "ip", s.SourceIP)
+			continue
+		}
 		actual, ok := interfaceIPv4(s.Interface)
 
 		switch {

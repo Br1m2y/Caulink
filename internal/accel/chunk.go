@@ -95,14 +95,29 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 	if !probe.acceptRng {
 		conns = 1
 	}
-	// 分片数超过 IP 数的 2 倍没有意义：同一 IP 上的分片只会互抢同一份额度。
-	if maxByIP := len(entries) * 2; conns > maxByIP {
+	// 分片数上限：每个在线源 IP 最多 4 条连接。
+	//
+	// 早先按"每 IP 2 条"设上限，依据是"同一 IP 上多开连接不会更快"。实测在
+	// 镜像站上并非如此：单连接 1.19 MB/s、同 IP 4 条 1.72 MB/s、8 条 1.92 MB/s，
+	// 说明不少站点是按**每连接**限速的，连接数本身就能换带宽。放宽到 4 条/IP，
+	// 仍受 MaxConnections 与在线 IP 数约束。
+	if maxByIP := len(entries) * 4; conns > maxByIP {
 		conns = maxByIP
 	}
 
 	plans := planChunks(probe.total, conns)
 	if len(plans) == 0 {
 		return fmt.Errorf("%w: 文件太小或分片参数非法", errFatal)
+	}
+
+	// 实际分片数可能与请求不同（在线 IP 少、文件小、或服务器不支持 Range），
+	// 记下来让界面能解释，而不是让用户以为"选了 8 片却没生效"。
+	t.mu.Lock()
+	t.effConns = len(plans)
+	t.mu.Unlock()
+	if len(plans) != t.conns {
+		t.logger.Info("分片数已按在线源与文件大小调整",
+			"requested", t.conns, "effective", len(plans), "entries", len(entries))
 	}
 
 	path, name, err := prepareFile(t.dir, probe.filename)

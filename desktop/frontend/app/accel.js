@@ -358,7 +358,12 @@
         msg.textContent = '已取消，未完成的文件已删除';
       } else if (t.status === 'running') {
         msg.className = 'acc-msg';
-        msg.textContent = '正在下载：' + (t.channels ? t.channels.length : 0) + ' 个分片';
+        var eff = t.effective_connections || (t.channels ? t.channels.length : 0);
+        msg.textContent = '正在下载：' + eff + ' 个分片';
+        // 选的片数和实际不一样时，说明原因，别让用户以为设置没生效。
+        if (t.connections && eff && eff < t.connections) {
+          msg.textContent += '（选了 ' + t.connections + ' 片，受在线 IP 与文件大小限制实际 ' + eff + ' 片）';
+        }
       }
     }
 

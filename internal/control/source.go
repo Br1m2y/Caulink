@@ -25,6 +25,22 @@ type RescanResult struct {
 	Message string `json:"message"`
 	// At 是扫描时刻。
 	At time.Time `json:"at"`
+	// Skipped 列出本机存在、但这次没有接入调度的网卡及原因。
+	//
+	// 用户插了网卡却"扫不到"时，多数不是程序没发现，而是那块网卡当时
+	// 还没有可路由的 IPv4（例如 DHCP 未完成、只有 169.254 链路本地地址）。
+	// 把原因带出去，界面才能解释"为什么少了一块"，而不是只显示一个数字。
+	Skipped []SkippedInterface `json:"skipped,omitempty"`
+}
+
+// SkippedInterface 是一块存在但未参与调度的网卡。
+type SkippedInterface struct {
+	// Interface 是网卡名（Windows 上即连接名，如 "WLAN 3"）。
+	Interface string `json:"interface"`
+	// Address 是这块网卡当前的地址快照，可能为空。
+	Address string `json:"address,omitempty"`
+	// Reason 是可直接展示给用户的原因。
+	Reason string `json:"reason"`
 }
 
 // registerSourceRoutes 注册网卡扫描相关路由。

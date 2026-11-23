@@ -316,10 +316,12 @@ func (c *chunk) view() ChannelView {
 }
 
 type task struct {
-	id        string
-	url       string
-	dir       string
-	conns     int
+	id    string
+	url   string
+	dir   string
+	conns int
+	// effConns 是实际分片数（探测与 IP 数决定），在 download() 里写入。
+	effConns  int
 	created   time.Time
 	startedAt time.Time
 	logger    *slog.Logger
@@ -358,18 +360,19 @@ func (t *task) setStatus(s string) {
 func (t *task) view() TaskView {
 	t.mu.Lock()
 	v := TaskView{
-		ID:          t.id,
-		URL:         t.url,
-		File:        t.file,
-		SavePath:    t.path,
-		Status:      t.status,
-		TotalBytes:  t.total,
-		DoneBytes:   t.doneByte,
-		SpeedBps:    t.speed,
-		ElapsedSecs: t.elapsed,
-		Error:       t.errMsg,
-		Connections: t.conns,
-		CreatedAt:   t.created,
+		ID:                   t.id,
+		URL:                  t.url,
+		File:                 t.file,
+		SavePath:             t.path,
+		Status:               t.status,
+		TotalBytes:           t.total,
+		DoneBytes:            t.doneByte,
+		SpeedBps:             t.speed,
+		ElapsedSecs:          t.elapsed,
+		Error:                t.errMsg,
+		Connections:          t.conns,
+		EffectiveConnections: t.effConns,
+		CreatedAt:            t.created,
 	}
 	chunks := t.chunks
 	t.mu.Unlock()
@@ -460,19 +463,24 @@ type ChannelView struct {
 
 // TaskView 是单任务快照。
 type TaskView struct {
-	ID          string        `json:"id"`
-	URL         string        `json:"url"`
-	File        string        `json:"file,omitempty"`
-	SavePath    string        `json:"save_path,omitempty"`
-	Status      string        `json:"status"`
-	TotalBytes  int64         `json:"total_bytes"`
-	DoneBytes   int64         `json:"done_bytes"`
-	SpeedBps    float64       `json:"speed_bps"`
-	ElapsedSecs float64       `json:"elapsed_seconds"`
-	Connections int           `json:"connections"`
-	Channels    []ChannelView `json:"channels,omitempty"`
-	Error       string        `json:"error,omitempty"`
-	CreatedAt   time.Time     `json:"created_at"`
+	ID          string  `json:"id"`
+	URL         string  `json:"url"`
+	File        string  `json:"file,omitempty"`
+	SavePath    string  `json:"save_path,omitempty"`
+	Status      string  `json:"status"`
+	TotalBytes  int64   `json:"total_bytes"`
+	DoneBytes   int64   `json:"done_bytes"`
+	SpeedBps    float64 `json:"speed_bps"`
+	ElapsedSecs float64 `json:"elapsed_seconds"`
+	Connections int     `json:"connections"`
+	// EffectiveConnections 是这次真正建立的分片数。
+	//
+	// 受"在线源 IP 数 × 每 IP 允许的分片数"与 MaxConnections 限制，可能小于
+	// 请求的 Connections。界面靠它解释"选了 8 片，为什么只有 4 条在跑"。
+	EffectiveConnections int           `json:"effective_connections"`
+	Channels             []ChannelView `json:"channels,omitempty"`
+	Error                string        `json:"error,omitempty"`
+	CreatedAt            time.Time     `json:"created_at"`
 }
 
 // ---------------------------------------------------------------------------
