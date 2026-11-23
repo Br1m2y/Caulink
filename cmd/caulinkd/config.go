@@ -112,7 +112,7 @@ func defaultConfig() Config {
 		Health: HealthConfig{
 			IntervalSeconds: 10,
 			TimeoutSeconds:  3,
-			Target:          "www.msftconnecttest.com:80",
+			Target:          "connect.rom.miui.com:80",
 			Window:          10,
 		},
 		Socks5: Socks5Config{Listen: "127.0.0.1:1080"},
@@ -153,7 +153,7 @@ func loadConfig(path string) (Config, error) {
 		cfg.Health.TimeoutSeconds = 3
 	}
 	if cfg.Health.Target == "" {
-		cfg.Health.Target = "www.msftconnecttest.com:80"
+		cfg.Health.Target = "connect.rom.miui.com:80"
 	}
 	if cfg.Health.Window <= 0 {
 		cfg.Health.Window = 10

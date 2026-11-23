@@ -115,7 +115,7 @@ type Options struct {
 	// 这是断连恢复延迟的主要来源：最坏情况要等一个周期才发起重认证。\n\t// 实测一次探测约 0.6s、几百字节，所以 10–15s 是"恢复快"和"请求量"的平衡点；\n\t// 低于 5s 收益递减，且会让门户和探测目标承受不必要的请求。
 	GuardianDuration int
 
-	// ProbeURL 是认证层自己用的在线探测地址，默认 http://www.msftconnecttest.com/connecttest.txt
+	// ProbeURL 是认证层自己用的在线探测地址，默认 http://connect.rom.miui.com/generate_204
 	ProbeURL string
 
 	// ProbeInterval 是**有流量时**的探测周期，默认 2s。比 GuardianDuration 小，
@@ -183,7 +183,7 @@ func (o *Options) applyDefaults() {
 		o.GuardianDuration = 15
 	}
 	if o.ProbeURL == "" {
-		o.ProbeURL = "http://www.msftconnecttest.com/connecttest.txt"
+		o.ProbeURL = "http://connect.rom.miui.com/generate_204"
 	}
 	if o.ProbeInterval <= 0 {
 		o.ProbeInterval = 2 * time.Second

@@ -65,7 +65,7 @@ type Options struct {
 	// Timeout 是单次 TCP 握手超时，默认 3s。
 	Timeout time.Duration
 
-	// Target 是探测目标，形如 host:port，默认 www.msftconnecttest.com:80。
+	// Target 是探测目标，形如 host:port，默认 connect.rom.miui.com:80。
 	//
 	// 用 TCP 握手而不是 HTTP 请求：更轻量、不依赖应用层协议、RTT 含义明确。
 	// 代价是它反映的是到目标的网络 RTT，不等于端到端应用延迟 —— 对调度足够。
@@ -86,7 +86,7 @@ func (o *Options) applyDefaults() {
 		o.Timeout = 3 * time.Second
 	}
 	if o.Target == "" {
-		o.Target = "www.msftconnecttest.com:80"
+		o.Target = "connect.rom.miui.com:80"
 	}
 	if o.Window <= 0 {
 		o.Window = 10

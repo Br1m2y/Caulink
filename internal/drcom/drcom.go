@@ -36,7 +36,7 @@ import (
 const DefaultPort = 801
 
 // defaultProbeURL 是在线判定地址：200 且内容匹配才算在线。
-const defaultProbeURL = "http://www.msftconnecttest.com/connecttest.txt"
+const defaultProbeURL = "http://connect.rom.miui.com/generate_204"
 
 // probeExpect 是 connecttest.txt 的固定内容片段，用来识破"200 但是劫持页"。
 const probeExpect = "Microsoft Connect Test"
@@ -216,8 +216,22 @@ func (c Client) Probe(ctx context.Context) (bool, error) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
+	// 204 No Content 是"生成式探测"端点的标准回答（如
+	// http://connect.rom.miui.com/generate_204）。它既没有响应体，也不会
+	// 被门户劫持页替换成 HTML——门户劫持一定返回 200 + 登录页。
+	// 早先这里只认 200 + 固定文案，导致这类端点永远被判离线：
+	// 认证子进程每 30 秒"检测到离线→重认证→成功"空转，界面看着正常但
+	// 门户登录在反复发生。踩过这个坑，故显式接受 204。
+	if resp.StatusCode == http.StatusNoContent {
+		return true, nil
+	}
 	if resp.StatusCode != http.StatusOK {
 		return false, nil
+	}
+	// 200 必须带上预期文案：门户劫持页通常是 200，不校验就会误判在线。
+	if probeExpect == "" {
+		return len(body) > 0, nil
 	}
 	return strings.Contains(string(body), probeExpect), nil
 }
