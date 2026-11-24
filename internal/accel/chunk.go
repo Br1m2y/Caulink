@@ -95,13 +95,15 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 	if !probe.acceptRng {
 		conns = 1
 	}
-	// 分片数上限：每个在线源 IP 最多 4 条连接。
+	// 分片数上限：每个在线源 IP 最多 8 条连接。
 	//
-	// 早先按"每 IP 2 条"设上限，依据是"同一 IP 上多开连接不会更快"。实测在
-	// 镜像站上并非如此：单连接 1.19 MB/s、同 IP 4 条 1.72 MB/s、8 条 1.92 MB/s，
-	// 说明不少站点是按**每连接**限速的，连接数本身就能换带宽。放宽到 4 条/IP，
-	// 仍受 MaxConnections 与在线 IP 数约束。
-	if maxByIP := len(entries) * 4; conns > maxByIP {
+	// 依据：不少下载站点按**每连接**限速，而不是每 IP 限速。实测同一台机器上
+	// 单连接 1.19 MB/s、同 IP 4 条 1.72 MB/s、8 条 1.92 MB/s。
+	// 实测另一处更极端：某游戏客户端 CDN 每连接只有约 190 KB/s，
+	// 8 条连接（两块网卡各 4 条）合计才 1.5 MB/s，远低于校园网单 IP 的 6 MB/s 上限。
+	// 这些场景下连接数就是唯一的带宽来源，所以上限放到 8 条/IP
+	// （两块网卡时等于 16 条），仍受 MaxConnections 与在线 IP 数约束。
+	if maxByIP := len(entries) * 8; conns > maxByIP {
 		conns = maxByIP
 	}
 
