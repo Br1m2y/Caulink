@@ -75,6 +75,29 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 		return errors.New("没有可调度的源 IP：请先在界面上登录校园网，等认证状态变成「在线」")
 	}
 
+	// 池里明明有第二个源、只是它此刻在重认证时，稍微等一会儿再开跑。
+	//
+	// 踩过的现象：点开始那一瞬间另一张网卡刚好在断线重认证，Schedulable()
+	// 把它过滤掉，于是 8 个分片全压在同一张卡上——网卡 A 跑满 1.5 MB/s、
+	// 网卡 B 只有 9 KB/s，用户看到的就是"多 IP 没生效"。
+	// 认证恢复通常只要几秒，等一等比事后补救简单得多。
+	if len(entries) == 1 && len(pool.Snapshot()) > 1 {
+		deadline := time.Now().Add(entryWaitTimeout)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
+			if next := pool.Schedulable(); len(next) > 1 {
+				t.logger.Info("等待第二个源上线成功", "entries", len(next),
+					"waited_ms", time.Since(deadline.Add(-entryWaitTimeout)).Milliseconds())
+				entries = next
+				break
+			}
+		}
+	}
+
 	u, err := url.Parse(t.url)
 	if err != nil {
 		return err
@@ -117,6 +140,8 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 	t.mu.Lock()
 	t.effConns = len(plans)
 	t.mu.Unlock()
+	t.logger.Info("开始下载", "chunks", len(plans), "requested", t.conns,
+		"sources", len(entries), "per_source", len(plans)/max(1, len(entries)))
 	if len(plans) != t.conns {
 		t.logger.Info("分片数已按在线源与文件大小调整",
 			"requested", t.conns, "effective", len(plans), "entries", len(entries))
@@ -252,7 +277,13 @@ func (t *task) fetchChunk(ctx context.Context, opts Options, c *chunk, probe pro
 		}
 		// 每次尝试都换下一个条目：这就是"换 IP 再试"，
 		// 而不是在同一个已经出问题的线路上死磕。
-		e := entries[(c.idx+attempt)%len(entries)]
+		// 每次重试都重新读一次池：中途恢复的网卡能立刻被用上，
+		// 而不是一直沿用开跑时那份快照（快照里可能缺了一个源）。
+		live := entries
+		if now := opts.Pool.Schedulable(); len(now) > 0 {
+			live = now
+		}
+		e := live[(c.idx+attempt)%len(live)]
 		c.setEntry(e)
 
 		err := t.fetchOnce(ctx, opts, c, probe, e, f)

@@ -55,6 +55,12 @@ const (
 	// MaxConnections 是上限，防止把并发开到把校园网门户惹毛。
 	MaxConnections = 32
 
+	// entryWaitTimeout 是"开跑前等待第二个源上线"的上限。
+	//
+	// 点开始那一瞬间另一张网卡可能在重认证，Schedulable() 会把它过滤掉，
+	// 结果是所有分片压在同一张卡上。认证恢复通常只要几秒，等一会儿即可。
+	entryWaitTimeout = 10 * time.Second
+
 	// minChunkSize 是单片下限。低于这个尺寸时，"多开一条连接"的握手与 TLS
 	// 开销会吃掉全部收益，不如老老实实单流。
 	minChunkSize = 2 << 20
