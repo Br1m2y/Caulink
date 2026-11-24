@@ -35,10 +35,21 @@ type sourceController struct {
 	exclude []string
 	pool    *ippool.Pool
 	auth    *authController
+
+	// autoConnect 为真时，扫描前会先尝试把"无线且没有地址"的网卡连上校园网。
+	autoConnect bool
+	// autoSSID 是要自动连接的 WiFi 名称。
+	autoSSID string
+	// dataDir 用来落临时生成的 WiFi 配置文件。
+	dataDir string
 }
 
-func newSourceController(ctx context.Context, logger *slog.Logger, configured []SourceConfig, exclude []string, pool *ippool.Pool, auth *authController) *sourceController {
-	return &sourceController{logger: logger, ctx: ctx, configured: configured, exclude: exclude, pool: pool, auth: auth}
+func newSourceController(ctx context.Context, logger *slog.Logger, configured []SourceConfig, exclude []string, pool *ippool.Pool, auth *authController, autoConnect bool, autoSSID, dataDir string) *sourceController {
+	return &sourceController{
+		logger: logger, ctx: ctx, configured: configured, exclude: exclude,
+		pool: pool, auth: auth,
+		autoConnect: autoConnect, autoSSID: autoSSID, dataDir: dataDir,
+	}
 }
 
 // RescanSources 见 control.SourceController。
@@ -47,6 +58,18 @@ func (c *sourceController) RescanSources() (control.RescanResult, error) {
 	defer c.mu.Unlock()
 
 	res := control.RescanResult{At: time.Now()}
+
+	// 先补充"能连上但还没连"的无线网卡，再算源列表。
+	//
+	// 新插的 USB 网卡通常没有 CAU 的配置文件，Windows 不会自动连；
+	// 这里替用户连一次，避免"扫不到网卡"的误会。只动无线且没有 IPv4 的网卡，
+	// 有地址的网卡不会被打断。
+	if c.autoConnect {
+		if connected := autoConnectWifi(c.ctx, c.logger, c.dataDir, c.autoSSID, c.exclude, 6*time.Second); len(connected) > 0 {
+			res.AutoConnected = connected
+			c.logger.Info("重新扫描：已自动连接无线网卡", "interfaces", connected)
+		}
+	}
 
 	next := resolveSources(c.configured, c.exclude, c.logger)
 

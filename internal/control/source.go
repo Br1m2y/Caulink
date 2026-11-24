@@ -25,6 +25,12 @@ type RescanResult struct {
 	Message string `json:"message"`
 	// At 是扫描时刻。
 	At time.Time `json:"at"`
+	// AutoConnected 是本轮扫描时由程序自动连上校园网的无线网卡。
+	//
+	// 新电脑插上新的 USB 无线网卡时，Windows 没有 CAU 的配置文件，网卡不会自己连；
+	// 扫描会先替用户连一次，连上后再把它加进调度池。界面据此告诉用户
+	// "刚才那块网卡是程序帮你连上的"。
+	AutoConnected []string `json:"auto_connected,omitempty"`
 	// Skipped 列出本机存在、但这次没有接入调度的网卡及原因。
 	//
 	// 用户插了网卡却"扫不到"时，多数不是程序没发现，而是那块网卡当时

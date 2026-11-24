@@ -21,6 +21,16 @@ type Config struct {
 	// Sources 是要参与调度的源 IP 列表。每个条目对应一张网卡上的一个地址。
 	Sources []SourceConfig `json:"sources"`
 
+	// AutoConnectWifi 表示重新扫描时，自动为"无线且没有地址"的网卡注入并连接
+	// 校园网配置。默认开启。
+	//
+	// 为什么要这个：一台新电脑上 Windows 没有 CAU 的配置文件，新插的 USB
+	// 无线网卡不会自己连，用户得手动去 WiFi 列表点一次，很容易以为"软件扫不到网卡"。
+	AutoConnectWifi *bool `json:"auto_connect_wifi,omitempty"`
+
+	// AutoConnectSSID 是自动连接的 WiFi 名称，默认 "CAU"。
+	AutoConnectSSID string `json:"auto_connect_ssid,omitempty"`
+
 	// ExcludeInterfaces 列出**不参与调度**的网卡名（自动发现时跳过）。
 	//
 	// 为什么需要：自动发现会把本机所有已启用的网卡都收进来，而 VPN 虚拟网卡
@@ -107,8 +117,11 @@ type StatusConfig struct {
 }
 
 func defaultConfig() Config {
+	autoConnect := true
 	return Config{
-		DataDir: "data",
+		DataDir:         "data",
+		AutoConnectWifi: &autoConnect,
+		AutoConnectSSID: "CAU",
 		Health: HealthConfig{
 			IntervalSeconds: 10,
 			TimeoutSeconds:  3,
@@ -285,6 +298,22 @@ func resolveExistingPath(p, configDir string) string {
 		}
 	}
 	return p
+}
+
+// autoConnectWifiEnabled 返回是否允许自动连接校园网（未配置时默认 true）。
+func (c Config) autoConnectWifiEnabled() bool {
+	if c.AutoConnectWifi == nil {
+		return true
+	}
+	return *c.AutoConnectWifi
+}
+
+// autoConnectSSID 返回自动连接的 WiFi 名称（未配置时默认 CAU）。
+func (c Config) autoConnectSSID() string {
+	if c.AutoConnectSSID == "" {
+		return "CAU"
+	}
+	return c.AutoConnectSSID
 }
 
 // isExcludedInterface 判断某块网卡是否被配置排除在调度之外。

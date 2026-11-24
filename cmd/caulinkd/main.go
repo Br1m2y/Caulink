@@ -150,7 +150,7 @@ func run(cfg Config, logger *slog.Logger) error {
 	defer authCtl.Close()
 
 	// 重新扫描：用户在界面上点「重新扫描」时，按网卡现状校正源列表。
-	srcCtl := newSourceController(ctx, logger, cfg.Sources, cfg.ExcludeInterfaces, pool, authCtl)
+	srcCtl := newSourceController(ctx, logger, cfg.Sources, cfg.ExcludeInterfaces, pool, authCtl, cfg.autoConnectWifiEnabled(), cfg.autoConnectSSID(), cfg.DataDir)
 
 	// 通用"按住系统代理"：让只认系统代理的程序（迅雷等）也走多 IP。
 	holdCtl := newProxyHoldController(logger, cfg.HTTPProxy.Listen)

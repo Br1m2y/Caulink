@@ -961,12 +961,18 @@
         var msg = (res && res.message) || ('扫描完成，共 ' + API.ports().length + ' 个端口');
         // 插了网卡却没出现时，把"为什么没出现"直接说出来。
         // 没有可路由 IPv4 的网卡不会进池（认证也绑不上），但用户需要知道它们被看见了。
+        // 扫描会先替用户把"无线但没连上"的网卡连上校园网，成功的要报出来，
+        // 否则用户会以为它本来就连着。
+        var auto = (res && res.auto_connected) || [];
+        if (auto.length) {
+          msg += '；已自动连接校园网：' + auto.join('、');
+        }
         var skipped = (res && res.skipped) || [];
         if (skipped.length) {
           msg += '；另有 ' + skipped.length + ' 个网卡无可用 IPv4（' +
             skipped.slice(0, 3).map(function (s) { return s.interface; }).join('、') + '）';
         }
-        toast(msg, skipped.length ? 'warn' : 'ok');
+        toast(msg, (skipped.length && !auto.length) ? 'warn' : 'ok');
       }).catch(function (err) {
         S.scanning = false;
         renderAll();
