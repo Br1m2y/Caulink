@@ -152,6 +152,23 @@ func run(cfg Config, logger *slog.Logger) error {
 	// 重新扫描：用户在界面上点「重新扫描」时，按网卡现状校正源列表。
 	srcCtl := newSourceController(ctx, logger, cfg.Sources, cfg.ExcludeInterfaces, pool, authCtl, cfg.autoConnectWifiEnabled(), cfg.autoConnectSSID(), cfg.DataDir)
 
+	// 启动后异步补一次"自动连接无线网卡 + 重扫"。
+	//
+	// 用户插上 USB 网卡后往往直接开着程序等结果，不会主动点重新扫描；
+	// 这里在后台补一次，网卡连上后自动进池。异步是为了不拖慢启动。
+	if cfg.autoConnectWifiEnabled() {
+		go func() {
+			connected, _ := autoConnectWifi(ctx, logger, cfg.DataDir, cfg.autoConnectSSID(), cfg.ExcludeInterfaces, 8*time.Second)
+			if len(connected) == 0 {
+				return
+			}
+			logger.Info("启动时自动连接无线网卡成功，重新扫描源", "interfaces", connected)
+			if _, err := srcCtl.RescanSources(); err != nil {
+				logger.Warn("自动连接后重新扫描失败", "err", err)
+			}
+		}()
+	}
+
 	// 通用"按住系统代理"：让只认系统代理的程序（迅雷等）也走多 IP。
 	holdCtl := newProxyHoldController(logger, cfg.HTTPProxy.Listen)
 	defer func() { _ = holdCtl.Stop() }()

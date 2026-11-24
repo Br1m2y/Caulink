@@ -967,6 +967,12 @@
         if (auto.length) {
           msg += '；已自动连接校园网：' + auto.join('、');
         }
+        // "试过了但没连上"必须单独说，否则用户只看到"无可用 IPv4"，会以为程序没动手。
+        var tried = (res && res.auto_tried) || [];
+        if (tried.length) {
+          msg += '；尝试自动连接但未成功：' + tried.join('、') +
+            '（检查该网卡是否被禁用、无线电是否关闭）';
+        }
         var skipped = (res && res.skipped) || [];
         if (skipped.length) {
           msg += '；另有 ' + skipped.length + ' 个网卡无可用 IPv4（' +

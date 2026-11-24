@@ -65,9 +65,14 @@ func (c *sourceController) RescanSources() (control.RescanResult, error) {
 	// 这里替用户连一次，避免"扫不到网卡"的误会。只动无线且没有 IPv4 的网卡，
 	// 有地址的网卡不会被打断。
 	if c.autoConnect {
-		if connected := autoConnectWifi(c.ctx, c.logger, c.dataDir, c.autoSSID, c.exclude, 6*time.Second); len(connected) > 0 {
+		connected, tried := autoConnectWifi(c.ctx, c.logger, c.dataDir, c.autoSSID, c.exclude, 6*time.Second)
+		if len(connected) > 0 {
 			res.AutoConnected = connected
 			c.logger.Info("重新扫描：已自动连接无线网卡", "interfaces", connected)
+		}
+		if len(tried) > 0 {
+			res.AutoTried = tried
+			c.logger.Warn("重新扫描：尝试连接但未取得地址", "interfaces", tried)
 		}
 	}
 

@@ -31,6 +31,11 @@ type RescanResult struct {
 	// 扫描会先替用户连一次，连上后再把它加进调度池。界面据此告诉用户
 	// "刚才那块网卡是程序帮你连上的"。
 	AutoConnected []string `json:"auto_connected,omitempty"`
+	// AutoTried 是尝试连接过、但最终没拿到地址的无线网卡。
+	//
+	// 与 AutoConnected 区分开：前者是"连上了只是慢"，后者是"根本没连上"，
+	// 界面要说清是哪一种，否则用户只会看到"无可用 IPv4"。
+	AutoTried []string `json:"auto_tried,omitempty"`
 	// Skipped 列出本机存在、但这次没有接入调度的网卡及原因。
 	//
 	// 用户插了网卡却"扫不到"时，多数不是程序没发现，而是那块网卡当时
