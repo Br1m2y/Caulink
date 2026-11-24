@@ -37,6 +37,10 @@ func main() {
 	daemon := ensureDaemon()
 	defer daemon.stop()
 
+	// 退出兜底：用户开着开关直接关窗口时，在这里还原系统代理，
+	// 避免把机器留在"代理指向 8080 但没人监听"的状态。
+	defer restoreProxyLease()
+
 	// 开发期调试开关：设置 CAU_DEBUG_PORT=9222 后 WebView2 会开放 CDP 端口，
 	// 便于用 DevTools 或脚本检查页面状态。不设置时完全关闭，行为与生产一致。
 	windowsOpts := application.WindowsOptions{}
@@ -65,6 +69,11 @@ func main() {
 		Name:        "CAU WIFI HELPER",
 		Description: "校园网多路径接入状态面板",
 		Windows:     windowsOpts,
+		// 退出时还原系统代理。
+		//
+		// defer 在 os.Exit / 强制结束时不执行，所以必须在应用自己的
+		// shutdown 回调里再做一次——这是"关掉软件就上不了网"的第二道保险。
+		OnShutdown: restoreProxyLease,
 		Assets: application.AssetOptions{
 			// 用 Bundled 版本：除了静态文件，还会在 /wails/runtime.js 提供
 			// 编译好的运行时（前端 shell.js 依赖它的 window.wails.Window）。

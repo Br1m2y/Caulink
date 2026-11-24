@@ -176,6 +176,8 @@ func (s *steamModeState) run(cancel chan struct{}) {
 	// PowerShell 是系统信任的程序，通常不会被拦；而且它有可见窗口，
 	// 用户能看到进度，比一个静默失败好得多。
 	log.Printf("[steam-mode] 开始，准备写系统代理 %s", steamProxyAddr)
+	// 先存快照再改代理：万一进程被强杀，下次启动能按租约还原。
+	_ = writeProxyLease()
 	if err := setSystemProxy(steamProxyAddr); err != nil {
 		// 本进程被安全策略限制修改系统代理，且它派生的任何子进程都会继承
 		// 同样的限制。实测过并全部失败：
@@ -196,6 +198,7 @@ func (s *steamModeState) run(cancel chan struct{}) {
 			hint = script
 		}
 
+		restoreProxyLease()
 		s.mu.Lock()
 		s.running = false
 		s.phase = "manual"
@@ -239,6 +242,8 @@ func (s *steamModeState) run(cancel chan struct{}) {
 	defer ticker.Stop()
 
 	for {
+		// 先存快照再改代理：万一进程被强杀，下次启动能按租约还原。
+		_ = writeProxyLease()
 		if err := setSystemProxy(steamProxyAddr); err != nil {
 			// 单次写失败不致命（可能被占用），继续重试
 			s.mu.Lock()
@@ -247,10 +252,13 @@ func (s *steamModeState) run(cancel chan struct{}) {
 		}
 		select {
 		case <-cancel:
+			// 关开关必须还原系统代理，否则会留下一个指向 8080 的死代理，
+			// 浏览器从此全部报 ERR_PROXY_CONNECTION_FAILED。
+			restoreProxyLease()
 			s.mu.Lock()
 			s.running = false
 			s.phase = "idle"
-			s.detail = "已取消按住"
+			s.detail = "已取消按住，系统代理已还原"
 			s.holdTill = time.Time{}
 			s.mu.Unlock()
 			return

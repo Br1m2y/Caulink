@@ -81,6 +81,8 @@ func (c *proxyHoldController) Start(seconds int) error {
 		snap.Server = ""
 	}
 
+	// 先落租约再改代理：进程若被强杀，下次启动可按它还原。
+	writeProxyLease(snap)
 	if err := setSystemProxy(c.proxy); err != nil {
 		c.mu.Unlock()
 		return fmt.Errorf("写入系统代理失败: %w", err)
@@ -161,6 +163,7 @@ func (c *proxyHoldController) holdLoop(dur time.Duration, forever bool, stopCh, 
 		case <-stopCh:
 			return
 		case <-ticker.C:
+			// 按住期间持续重申代理；租约已在 Start() 里落过，这里不再重复写。
 			if err := setSystemProxy(c.proxy); err != nil {
 				c.mu.Lock()
 				c.lastErr = err.Error()
@@ -188,6 +191,7 @@ func (c *proxyHoldController) restore() {
 		c.logger.Warn("还原系统代理失败", "err", err)
 		return
 	}
+	removeProxyLease()
 	if snap.Enable {
 		c.logger.Info("系统代理已还原", "server", snap.Server, "enabled", true)
 	} else {

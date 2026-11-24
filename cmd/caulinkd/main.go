@@ -78,6 +78,10 @@ func run(cfg Config, logger *slog.Logger) error {
 
 	pool := ippool.New()
 
+	// 上次若是被强杀，系统代理可能还指着我们、而我们已经没有在监听。
+	// 启动先把这类残留租约还原掉，否则用户一开机就上不了网。
+	healProxyLease(logger)
+
 	// 校园网是 DHCP，网卡重连后 IP 会变。用网卡当前的地址校正配置，
 	// 否则会留下一个绑不上的源，界面上表现为某个端口永远"认证中"。
 	cfg.Sources = resolveSources(cfg.Sources, cfg.ExcludeInterfaces, logger)
