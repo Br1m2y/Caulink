@@ -53,7 +53,7 @@ const (
 	DefaultConnections = 8
 
 	// MaxConnections 是上限，防止把并发开到把校园网门户惹毛。
-	MaxConnections = 16
+	MaxConnections = 32
 
 	// minChunkSize 是单片下限。低于这个尺寸时，"多开一条连接"的握手与 TLS
 	// 开销会吃掉全部收益，不如老老实实单流。

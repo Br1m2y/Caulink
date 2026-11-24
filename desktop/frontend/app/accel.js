@@ -129,6 +129,7 @@
       '    <option value="4">4 片</option>',
       '    <option value="8" selected>8 片</option>',
       '    <option value="16">16 片</option>',
+        '    <option value="32">32 片</option>',
       '  </select>',
       '  <button class="acc-btn primary" id="acc-start">开始加速</button>',
       '</div>',

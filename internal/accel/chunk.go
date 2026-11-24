@@ -95,7 +95,7 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 	if !probe.acceptRng {
 		conns = 1
 	}
-	// 分片数上限：每个在线源 IP 最多 8 条连接。
+	// 分片数上限：每个在线源 IP 最多 16 条连接。
 	//
 	// 依据：不少下载站点按**每连接**限速，而不是每 IP 限速。实测同一台机器上
 	// 单连接 1.19 MB/s、同 IP 4 条 1.72 MB/s、8 条 1.92 MB/s。
@@ -103,7 +103,7 @@ func (t *task) download(ctx context.Context, opts Options, pool *ippool.Pool) er
 	// 8 条连接（两块网卡各 4 条）合计才 1.5 MB/s，远低于校园网单 IP 的 6 MB/s 上限。
 	// 这些场景下连接数就是唯一的带宽来源，所以上限放到 8 条/IP
 	// （两块网卡时等于 16 条），仍受 MaxConnections 与在线 IP 数约束。
-	if maxByIP := len(entries) * 8; conns > maxByIP {
+	if maxByIP := len(entries) * 16; conns > maxByIP {
 		conns = maxByIP
 	}
 
