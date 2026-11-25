@@ -37,6 +37,12 @@ type instanceConfig struct {
 	CheckSeconds int `json:"check_seconds"`
 	// LogDir 是日志目录。
 	LogDir string `json:"log_dir"`
+	// PortalCache 是"源 IP → 正确门户节点"的缓存文件路径。
+	//
+	// 校园网 ePortal 按网段分流，多个节点并存；登录必须发到管本网段的那个，
+	// 否则门户照样回 3.htm 成功页、流量却继续被劫持。缓存让子进程与守护进程
+	// 共用同一个"上次成功的节点"。
+	PortalCache string `json:"portal_cache"`
 }
 
 // instanceDir 返回某个源 IP 实例的数据目录。
@@ -63,6 +69,7 @@ func (o Options) writeInstanceConfig(entry contract.IPPoolEntry) (cfgPath, logPa
 		SourceIP:     entry.SourceIP,
 		CheckSeconds: o.GuardianDuration,
 		LogDir:       dir,
+		PortalCache:  o.PortalCachePath,
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

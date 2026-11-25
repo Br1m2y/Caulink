@@ -30,6 +30,7 @@ import (
 	"github.com/Br1m2y/caulink/internal/drcom"
 	"github.com/Br1m2y/caulink/internal/ippool"
 	"github.com/Br1m2y/caulink/internal/netsrc"
+	"github.com/Br1m2y/caulink/internal/portal"
 	"github.com/Br1m2y/caulink/internal/reauth"
 	contract "github.com/Br1m2y/caulink/pkg/contract/v1"
 )
@@ -69,6 +70,12 @@ func newAuthController(
 	pool *ippool.Pool,
 	credDir string,
 ) *authController {
+	// "源 IP → 正确门户节点"缓存，守护进程与认证子进程共用。
+	// 校园网门户按网段分流，登录发给错误节点会"假成功"，必须按源 IP 记住正确的那个。
+	cachePath := filepath.Join(credDir, "portal-map.json")
+	opts.Portals = portal.Load(cachePath)
+	opts.PortalCachePath = cachePath
+
 	return &authController{
 		logger:  logger,
 		opts:    opts,
@@ -362,7 +369,8 @@ func (c *authController) verifyCredential(username, password string) (pending bo
 		return true, nil
 	}
 
-	if err := client.Login(ctx); err != nil {
+	// 登录前验证同样要"选对节点 + 验证生效"，否则手动登录也会假成功。
+	if err := client.LoginWithDiscovery(ctx, c.opts.Portals); err != nil {
 		c.setErr(err)
 		return false, fmt.Errorf("认证失败：%w", err)
 	}

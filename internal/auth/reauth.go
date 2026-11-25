@@ -70,12 +70,19 @@ func (w *worker) forceReauth(ctx context.Context, reason string) error {
 
 	w.setStatus(contract.AuthReauthenticating, reason+"，立即重认证")
 
-	if err := client.Login(ctx); err != nil {
+	// 关键：登录后必须验证真的生效。
+	//
+	// 校园网门户按网段分流，把登录发给错误的节点时它照样返回 3.htm
+	// （我们过去据此判成功），但该 IP 的流量继续被劫持——于是出现
+	// "认证成功 → 2 秒后探测又判离线 → 再重登"的无限闪烁。
+	// LoginWithDiscovery 会依次尝试 缓存 → 配置 → 拦截页发现的节点，
+	// 并且每个候选都要求探测通过才算数。
+	if err := client.LoginWithDiscovery(ctx, w.opts.Portals); err != nil {
 		w.setStatus(contract.AuthOffline, "事件驱动重认证失败: "+err.Error())
 		return fmt.Errorf("auth: 源 IP %s 事件驱动重认证失败: %w", w.entry.SourceIP, err)
 	}
 
-	w.setStatus(contract.AuthOnline, "事件驱动重认证成功")
+	w.setStatus(contract.AuthOnline, "事件驱动重认证成功（已验证连通）")
 	return nil
 }
 

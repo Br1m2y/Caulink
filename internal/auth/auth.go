@@ -47,6 +47,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Br1m2y/caulink/internal/portal"
 	contract "github.com/Br1m2y/caulink/pkg/contract/v1"
 )
 
@@ -110,6 +111,12 @@ type Options struct {
 
 	// Account 是登录凭据。所有 IP 实例共用同一账号。
 	Account Account
+
+	// Portals 记录"每个源 IP 该用哪个门户节点"，与认证子进程共用。
+	Portals *portal.Cache
+
+	// PortalCachePath 是上面那份缓存的落盘路径（会写进实例配置，供子进程读取）。
+	PortalCachePath string
 
 	// GuardianDuration 是子进程自身的在线检查周期（秒），默认 15。
 	// 这是断连恢复延迟的主要来源：最坏情况要等一个周期才发起重认证。\n\t// 实测一次探测约 0.6s、几百字节，所以 10–15s 是"恢复快"和"请求量"的平衡点；\n\t// 低于 5s 收益递减，且会让门户和探测目标承受不必要的请求。

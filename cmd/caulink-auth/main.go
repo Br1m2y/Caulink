@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Br1m2y/caulink/internal/drcom"
+	"github.com/Br1m2y/caulink/internal/portal"
 )
 
 // config 与 internal/auth 生成的 auth.json 对齐（字段名即 JSON 契约）。
@@ -34,6 +35,8 @@ type config struct {
 	SourceIP     string `json:"source_ip"`
 	CheckSeconds int    `json:"check_seconds"`
 	LogDir       string `json:"log_dir"`
+	// PortalCache 与守护进程共用的"源 IP → 正确门户节点"缓存。
+	PortalCache string `json:"portal_cache"`
 }
 
 func (c config) client() drcom.Client {
@@ -71,6 +74,9 @@ func main() {
 	}
 
 	client := cfg.client()
+	// 与守护进程共用的"源 IP → 正确门户节点"缓存。
+	// 校园网门户按网段分流，登录必须发给管本网段的那个节点，否则会"假成功"。
+	portals := portal.Load(cfg.PortalCache)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -87,13 +93,13 @@ func main() {
 		online, err := client.Probe(ctx)
 		logf("当前状态：%s", boolToState(online, err))
 		if !online {
-			if err := client.Login(ctx); err != nil {
+			if err := client.LoginWithDiscovery(ctx, portals); err != nil {
 				fatal("登录失败: %v", err)
 			}
 			logf("登录成功")
 		}
 	default:
-		runLoop(ctx, client, cfg, *debug)
+		runLoop(ctx, client, cfg, portals, *debug)
 	}
 }
 
@@ -101,7 +107,7 @@ func main() {
 //
 // 主要的恢复路径是**事件驱动**（代理层发现上游失败 → 守护进程立刻重认证），
 // 这里的周期检查用于兜住"没有流量、因而代理层看不到失败"的沉默掉线。
-func runLoop(ctx context.Context, client drcom.Client, cfg config, debug bool) {
+func runLoop(ctx context.Context, client drcom.Client, cfg config, portals *portal.Cache, debug bool) {
 	interval := time.Duration(cfg.CheckSeconds) * time.Second
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -118,7 +124,7 @@ func runLoop(ctx context.Context, client drcom.Client, cfg config, debug bool) {
 		}
 		if !online {
 			logf("兜底检测到离线（%s），开始重认证", boolToState(online, err))
-			if err := client.Login(ctx); err != nil {
+			if err := client.LoginWithDiscovery(ctx, portals); err != nil {
 				failures++
 				if failures > 5 {
 					failures = 5
