@@ -67,6 +67,18 @@ func (w *worker) forceReauth(ctx context.Context, reason string) error {
 		// 链路本来是通的：触发信号来自目标站点，不动认证状态。
 		return nil
 	}
+	if err != nil {
+		// 所有探测目标都不可达：这是"未知"，不是"掉线"。
+		//
+		// 实测 connect.rom.miui.com 会从某些源 IP 整段超时，而该 IP 的 HTTPS
+		// 完全正常。过去把这种超时当成离线，导致"登录成功→验证超时→再登录"
+		// 的无限循环。宁可不动，也不要在链路正常时反复登录。
+		if w.opts.Logger != nil {
+			w.opts.Logger.Info("探测目标全部不可达，跳过本次重认证",
+				"id", w.entry.ID, "reason", reason, "err", err)
+		}
+		return nil
+	}
 
 	w.setStatus(contract.AuthReauthenticating, reason+"，立即重认证")
 

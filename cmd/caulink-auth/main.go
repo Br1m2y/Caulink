@@ -122,6 +122,16 @@ func runLoop(ctx context.Context, client drcom.Client, cfg config, portals *port
 		if err != nil && debug {
 			logf("在线检查异常: %v", err)
 		}
+		if !online && err != nil {
+			// 所有探测目标都不可达：判不了"在线/离线"，本轮什么都不做。
+			// 否则探测目标一挂，就会变成"每 30 秒重登录一次"的空转。
+			logf("探测目标全部不可达（%s），跳过本轮重认证", err)
+			failures = 0
+			if sleepCtx(ctx, interval) {
+				continue
+			}
+			return
+		}
 		if !online {
 			logf("兜底检测到离线（%s），开始重认证", boolToState(online, err))
 			if err := client.LoginWithDiscovery(ctx, portals); err != nil {

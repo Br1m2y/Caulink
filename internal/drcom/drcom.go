@@ -199,41 +199,110 @@ func (c Client) Logout(ctx context.Context) error {
 //   - 不跟随重定向：未认证时 portal 会 302 到登录页，跟随会拿到登录页的 200；
 //   - 校验响应内容：避免"200 但其实是劫持页"的假在线；
 //   - 失败一律视为离线，宁可多登一次也不要漏判。
+//
+// probeState 是一次探测的三种结论。
+//
+// 区分"劫持"和"不可达"至关重要：
+//   - 劫持：门户把我们拦下来了，需要重新认证；
+//   - 不可达：探测目标本身从这个源 IP 走不通（实测 connect.rom.miui.com
+//     会对某些源 IP 整段超时，而该 IP 的 HTTPS 是通的）。
+//
+// 过去两者混为一谈，于是"探测目标挂了"被当成"掉线"，触发无限重认证。
+type probeState int
+
+const (
+	probeUnreachable probeState = iota
+	probeOnline
+	probeHijacked
+)
+
+// probeTargets 是探测候选地址，按顺序尝试，任一给出确定结论即停止。
+//
+// 为什么是多个：单一探测目标迟早会从某条路径不可达（实测过小米节点对某个
+// 源 IP 完全超时）。多目标 + 明确的"不可达"语义，才能把"误判掉线"挡在门外。
+var probeTargets = []string{
+	"http://connect.rom.miui.com/generate_204",
+	"http://www.msftconnecttest.com/connecttest.txt",
+	"http://connectivitycheck.platform.hicloud.com/generate_204",
+}
+
+// Probe 判断该源 IP 当前是否在线。
+//
+// 返回 (false, nil) 表示**确定离线**（被门户劫持）；返回 (false, err) 表示
+// 所有探测目标都不可达——这是"未知"，调用方不应据此重新登录。
 func (c Client) Probe(ctx context.Context) (bool, error) {
-	probeURL := c.ProbeURL
-	if probeURL == "" {
-		probeURL = defaultProbeURL
+	targets := probeTargets
+	if c.ProbeURL != "" {
+		targets = []string{c.ProbeURL}
 	}
+
+	var errs []string
+	for _, raw := range targets {
+		state, err := c.probeOne(ctx, raw)
+		switch state {
+		case probeOnline:
+			return true, nil
+		case probeHijacked:
+			return false, nil
+		default:
+			if err != nil {
+				errs = append(errs, raw+": "+err.Error())
+			}
+		}
+	}
+	return false, fmt.Errorf("drcom: 探测目标全部不可达: %s", strings.Join(errs, "; "))
+}
+
+// probeOne 探测单个目标。
+func (c Client) probeOne(ctx context.Context, rawURL string) (probeState, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, probeURL, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return false, err
+		return probeUnreachable, err
+	}
+	if probeUserAgent != "" {
+		req.Header.Set("User-Agent", probeUserAgent)
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return false, err
+		return probeUnreachable, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
-	// 204 No Content 是"生成式探测"端点的标准回答（如
-	// http://connect.rom.miui.com/generate_204）。它既没有响应体，也不会
-	// 被门户劫持页替换成 HTML——门户劫持一定返回 200 + 登录页。
-	// 早先这里只认 200 + 固定文案，导致这类端点永远被判离线：
-	// 认证子进程每 30 秒"检测到离线→重认证→成功"空转，界面看着正常但
-	// 门户登录在反复发生。踩过这个坑，故显式接受 204。
+	// 落到别的主机 = 被门户重定向。
+	if final := resp.Request.URL; final != nil {
+		if orig, perr := url.Parse(rawURL); perr == nil && !strings.EqualFold(final.Hostname(), orig.Hostname()) {
+			return probeHijacked, nil
+		}
+	}
+
+	// 204 No Content 是"生成式探测"端点的标准回答，既无响应体，也不会被
+	// 劫持页替换成 HTML。
 	if resp.StatusCode == http.StatusNoContent {
-		return true, nil
+		return probeOnline, nil
+	}
+	// 3xx：门户劫持的典型形态（跳登录页）。判"确定离线"而不是"不可达"，
+	// 否则会被当成未知而跳过重认证。
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return probeHijacked, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return false, nil
+		return probeUnreachable, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	// 200 必须带上预期文案：门户劫持页通常是 200，不校验就会误判在线。
-	if probeExpect == "" {
-		return len(body) > 0, nil
+
+	// 200 + HTML：门户劫持页通常就是这样返回的。
+	ctype := strings.ToLower(resp.Header.Get("Content-Type"))
+	text := string(body)
+	if probeExpect != "" && strings.Contains(text, probeExpect) {
+		return probeOnline, nil
 	}
-	return strings.Contains(string(body), probeExpect), nil
+	if strings.Contains(ctype, "html") || strings.Contains(strings.ToLower(text), "<html") {
+		return probeHijacked, nil
+	}
+	// 其余 200（纯文本等）视为在线。
+	return probeOnline, nil
 }
 
 // DecodeReason 从 Location 里抽出可读的错误信息。

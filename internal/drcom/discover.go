@@ -3,6 +3,7 @@ package drcom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,8 +24,15 @@ import (
 //  1. 登录后必须**探测到在线**才算成功（不再只认 3.htm）；
 //  2. 从拦截页里找出本网段真正该用的节点，按源 IP 缓存，下次直接用。
 
-// ErrLoginIneffective 表示登录接口报成功，但该源 IP 仍未获得连通性。
+// ErrLoginIneffective 表示登录接口报成功，但该源 IP 仍未获得连通性
+// （探测明确看到门户劫持页）。
 var ErrLoginIneffective = errors.New("drcom: 登录返回成功，但该源 IP 的流量仍被门户劫持")
+
+// ErrVerifyUnreachable 表示登录后探测目标全部不可达，无法判断是否生效。
+//
+// 与 ErrLoginIneffective 区分开很重要：前者换门户节点也没用（是探测路径本身
+// 的问题），后者才值得去试别的节点。日志也该说清楚是哪一种。
+var ErrVerifyUnreachable = errors.New("drcom: 登录后无法验证（探测目标全部不可达）")
 
 // jsRedirectRe 匹配拦截页里的 JS 跳转地址。
 //
@@ -109,15 +117,27 @@ func (c Client) LoginAndVerify(ctx context.Context) error {
 		return err
 	}
 	// 登录生效可能有几百毫秒延迟，给 3 次机会。
+	var lastProbeErr error
+	hijacked := false
 	for i := 0; i < 3; i++ {
-		if online, _ := c.Probe(ctx); online {
+		online, perr := c.Probe(ctx)
+		if online {
 			return nil
+		}
+		if perr != nil {
+			lastProbeErr = perr
+		} else {
+			hijacked = true
+			lastProbeErr = nil
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(300 * time.Millisecond):
 		}
+	}
+	if lastProbeErr != nil && !hijacked {
+		return fmt.Errorf("%w: %v", ErrVerifyUnreachable, lastProbeErr)
 	}
 	return ErrLoginIneffective
 }
@@ -161,6 +181,10 @@ func (c Client) LoginWithDiscovery(ctx context.Context, cache *portal.Cache) err
 		attempt.Port = port
 		if err := attempt.LoginAndVerify(ctx); err != nil {
 			lastErr = err
+			// 探测目标全部不可达时，换节点也不可能验证成功，直接返回。
+			if errors.Is(err, ErrVerifyUnreachable) {
+				return err
+			}
 			continue
 		}
 		if cache != nil {

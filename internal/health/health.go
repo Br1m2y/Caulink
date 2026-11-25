@@ -160,13 +160,28 @@ func (p *Prober) ProbeOnce(ctx context.Context) {
 func (p *Prober) probeOne(ctx context.Context, e contract.IPPoolEntry) {
 	// 探测同样要遵守"源与目标同族"：用 v4 源去连解析出 v6 的目标会被内核拒绝，
 	// 健康分会一路掉到 0，把一条完全正常的链路误判成坏。
-	target, err := netsrc.Resolve(ctx, p.opts.Target, e)
-	if err != nil {
-		p.opts.Logger.Warn("探测目标不可用（源地址族不匹配）", "id", e.ID, "target", p.opts.Target, "err", err)
-		return
+	// 多目标：某个探测域名会从特定源 IP 整段不可达（实测过 connect.rom.miui.com
+	// 对某些源 IP 完全超时，而该 IP 的 HTTPS 正常）。单目标会把"探测点挂了"
+	// 误算成"链路坏了"，健康分掉到 0 后该源被踢出调度。
+	//
+	// 按顺序尝试，任一拿到 RTT 即用。全部失败才记一次丢包。
+	var rtt float64
+	var ok bool
+	var lastErr error
+	for _, target := range p.candidateTargets() {
+		resolved, rerr := netsrc.Resolve(ctx, target, e)
+		if rerr != nil {
+			lastErr = rerr
+			continue
+		}
+		rtt, ok = dialRTT(ctx, resolved.Network, resolved.Addr, resolved.Source, p.opts.Timeout)
+		if ok {
+			break
+		}
 	}
-
-	rtt, ok := dialRTT(ctx, target.Network, target.Addr, target.Source, p.opts.Timeout)
+	if !ok && lastErr != nil {
+		p.opts.Logger.Debug("所有健康探测目标均不可达", "id", e.ID, "err", lastErr)
+	}
 
 	w := p.windowFor(e.ID)
 	w.push(rtt, ok)
@@ -271,4 +286,22 @@ func (w *window) stats() (avgRTT, loss float64) {
 		avgRTT = sum / float64(okCount)
 	}
 	return avgRTT, loss
+}
+
+// candidateTargets 返回健康探测的候选目标，配置的那个排第一。
+func (p *Prober) candidateTargets() []string {
+	out := []string{}
+	if p.opts.Target != "" {
+		out = append(out, p.opts.Target)
+	}
+	for _, t := range []string{
+		"www.msftconnecttest.com:80",
+		"connectivitycheck.platform.hicloud.com:80",
+		"connect.rom.miui.com:80",
+	} {
+		if t != p.opts.Target {
+			out = append(out, t)
+		}
+	}
+	return out
 }
