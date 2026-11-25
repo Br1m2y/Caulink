@@ -100,6 +100,19 @@ func (h *daemonHandle) stop() {
 		return
 	}
 	log.Printf("[daemon] 关闭由本程序启动的 caulinkd")
+
+	// 先请求它自己退出：守护进程收到后会把系统代理还原、把认证子进程停掉、
+	// 清理租约，然后正常返回。直接 Kill 的话这些收尾全都不会执行，
+	// 实机上表现为"关掉软件就上不了网"和"认证进程越攒越多"。
+	if requestShutdown(statusURL) {
+		if waitExit(h.cmd, 8*time.Second) {
+			log.Printf("[daemon] 守护进程已正常退出")
+			clearPID()
+			return
+		}
+		log.Printf("[daemon] 守护进程未在超时内退出，改为强制结束")
+	}
+
 	_ = h.cmd.Process.Kill()
 	_, _ = h.cmd.Process.Wait()
 	clearPID()
@@ -246,4 +259,41 @@ func cleanupStaleDaemon() {
 		}
 	}
 	_ = os.Remove(pidFilePath())
+}
+
+// requestShutdown 请求守护进程优雅退出，返回请求是否被接受。
+//
+// 必须带 X-Caulink-Action 头：服务端用这个头区分"我们自己的调用"与
+// 浏览器里任意页面发起的跨站请求。
+func requestShutdown(statusURL string) bool {
+	// statusURL 是 .../api/v1/status，去掉这段才是根地址。
+	base := strings.TrimSuffix(statusURL, "/api/v1/status")
+	url := base + "/api/v1/shutdown"
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("X-Caulink-Action", "1")
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusAccepted
+}
+
+// waitExit 在 timeout 内等待子进程退出。
+func waitExit(cmd *exec.Cmd, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		_, _ = cmd.Process.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }

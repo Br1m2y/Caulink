@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -77,6 +78,18 @@ func run(cfg Config, logger *slog.Logger) error {
 	defer stop()
 
 	pool := ippool.New()
+
+	// 把本进程放进"关闭即杀"的作业对象：桌面端强杀我们时，认证子进程会被
+	// 内核一并结束，不再变成孤儿继续登录门户。
+	jobCleanup, jobErr := ensureProcessJob()
+	if jobErr != nil {
+		logger.Warn("创建进程作业对象失败，强杀时子进程可能残留", "err", jobErr)
+	} else {
+		defer jobCleanup()
+	}
+
+	// 清扫上一轮（升级前）遗留的认证子进程。作业对象管不到已经存在的孤儿。
+	killOrphanAuthProcesses(logger)
 
 	// 上次若是被强杀，系统代理可能还指着我们、而我们已经没有在监听。
 	// 启动先把这类残留租约还原掉，否则用户一开机就上不了网。
@@ -289,6 +302,14 @@ func run(cfg Config, logger *slog.Logger) error {
 	// 启动失败不拖垮主流程：端口被占用是常见情况，代理仍然可用，
 	// 只是 UI 拿不到数据。这时候正确的做法是让用户看到明确的日志，
 	// 而不是让整个进程起不来。
+	// 远程关闭通道：桌面端通过 /api/v1/shutdown 请求，让 run() 正常返回，
+	// 从而执行 defer 里的代理还原与认证子进程停止。
+	shutdownCh := make(chan struct{})
+	var shutdownOnce sync.Once
+	requestShutdown := func() {
+		shutdownOnce.Do(func() { close(shutdownCh) })
+	}
+
 	if cfg.Status.Listen != "" {
 		statusSrv := &control.StatusServer{
 			Listen:        cfg.Status.Listen,
@@ -302,6 +323,7 @@ func run(cfg Config, logger *slog.Logger) error {
 			Sources:       srcCtl,
 			ProxyHold:     holdCtl,
 			Accel:         accelMgr,
+			Shutdown:      requestShutdown,
 			Version:       version,
 			Logger:        logger,
 		}
@@ -328,6 +350,9 @@ func run(cfg Config, logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		return nil
+	case <-shutdownCh:
+		logger.Info("收到桌面端的关闭请求，正在正常退出")
 		return nil
 	case <-ctx.Done():
 		logger.Info("收到退出信号，正在关闭")

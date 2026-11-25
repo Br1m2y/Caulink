@@ -68,6 +68,13 @@ type StatusServer struct {
 	// 所以它和登录一样要求 X-Caulink-Action 头（见 accel.go）。
 	Accel AccelController
 
+	// Shutdown 可选。非 nil 时提供 POST /api/v1/shutdown，供桌面端优雅退出。
+	//
+	// 为什么需要它：桌面端原来直接 TerminateProcess 结束守护进程，
+	// defer 全部不执行——系统代理不还原、认证子进程不被停、租约不清理。
+	// 有了这个接口，桌面端可以先请求退出并等待，超时才回退到强杀。
+	Shutdown func()
+
 	// Steam 可选。为 nil 时 Steam 控制接口返回 501。
 	//
 	// 这是控制面里唯一的写操作入口，且只暴露"重启 Steam 以支持多 IP"这一件事，
@@ -160,6 +167,7 @@ func (s *StatusServer) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/api/v1/shutdown", s.handleShutdown)
 	s.registerSteamRoutes(mux)
 	s.registerAuthRoutes(mux)
 	s.registerSourceRoutes(mux)
@@ -319,4 +327,29 @@ func (s *StatusServer) buildScheduler(entries []contract.IPPoolEntry, tot Totals
 		}
 	}
 	return out
+}
+
+// handleShutdown 让守护进程优雅退出。
+//
+// 只接受 POST 且要求 X-Caulink-Action 头：这是唯一能让服务消失的接口，
+// 不能让浏览器里的任意页面（跨站请求）触发。
+//
+// 先回 202 再退出：调用方需要明确知道"请求已被接受"，否则它只看到连接被
+// 重置，会误以为是失败并立刻强杀，优雅退出就白做了。
+func (s *StatusServer) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "只接受 POST")
+		return
+	}
+	if r.Header.Get("X-Caulink-Action") != "1" {
+		writeErr(w, http.StatusForbidden, "缺少 X-Caulink-Action 头")
+		return
+	}
+	if s.Shutdown == nil {
+		writeErr(w, http.StatusNotImplemented, "本进程不支持远程关闭")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutting down"})
+	// 放到响应之后执行，避免还没写完就被关掉监听。
+	go s.Shutdown()
 }
